@@ -11,6 +11,7 @@ permissions:
 jobs:
   check-status:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +24,9 @@ jobs:
         run: |
           npm init -y
           npm install playwright
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
 
       - name: Run status checker
         env:
