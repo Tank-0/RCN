@@ -9,17 +9,32 @@ on:
         description: 'The domain to scan (e.g., example.com)'
         required: true
         type: string
-      severity:
-        description: 'Severity level to scan for (required)'
-        required: true
-        default: 'medium'
-        type: choice
-        options:
-        - 'info'
-        - 'low'
-        - 'medium'
-        - 'high'
-        - 'critical'
+      # --- Severity Level Checkboxes ---
+      severity_critical:
+        description: 'Scan for CRITICAL severity'
+        required: false
+        type: boolean
+        default: true
+      severity_high:
+        description: 'Scan for HIGH severity'
+        required: false
+        type: boolean
+        default: true
+      severity_medium:
+        description: 'Scan for MEDIUM severity'
+        required: false
+        type: boolean
+        default: true
+      severity_low:
+        description: 'Scan for LOW severity'
+        required: false
+        type: boolean
+        default: false
+      severity_info:
+        description: 'Scan for INFO severity'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   nuclei-scan:
@@ -51,11 +66,39 @@ jobs:
         run: |
           echo "Starting Nuclei scan on ${{ github.event.inputs.target_domain }}..."
           
-          # Run nuclei with standard output. No -jsonl or -markdown flag.
-          # The output will be clean and human-readable.
+          # --- Build the -s flag string based on checkbox inputs ---
+          SEVERITIES=()
+          if [ "${{ github.event.inputs.severity_critical }}" == "true" ]; then
+            SEVERITIES+=("critical")
+          fi
+          if [ "${{ github.event.inputs.severity_high }}" == "true" ]; then
+            SEVERITIES+=("high")
+          fi
+          if [ "${{ github.event.inputs.severity_medium }}" == "true" ]; then
+            SEVERITIES+=("medium")
+          fi
+          if [ "${{ github.event.inputs.severity_low }}" == "true" ]; then
+            SEVERITIES+=("low")
+          fi
+          if [ "${{ github.event.inputs.severity_info }}" == "true" ]; then
+            SEVERITIES+=("info")
+          fi
+
+          # Join the array into a comma-separated string for Nuclei
+          SEVERITY_STRING=$(IFS=,; echo "${SEVERITIES[*]}")
+
+          # Check if any severities were selected
+          if [ -z "$SEVERITY_STRING" ]; then
+            echo "Error: No severity levels were selected. Please select at least one."
+            exit 1
+          fi
+
+          echo "Scanning for severities: ${SEVERITY_STRING}"
+          
+          # Run nuclei with the dynamically generated severity string
           nuclei \
             -u "${{ github.event.inputs.target_domain }}" \
-            -severity "${{ github.event.inputs.severity }}" \
+            -s "${SEVERITY_STRING}" \
             -rate-limit 5 \
             -o nuclei-results.txt
           
@@ -66,14 +109,12 @@ jobs:
         if: always() # Run this step even if the previous one failed
         run: |
           TARGET="${{ github.event.inputs.target_domain }}"
-          SEVERITY="${{ github.event.inputs.severity }}"
           RESULTS_FILE="nuclei-results.txt"
           MESSAGE_FILE="telegram-message.txt"
 
           # Create the message file with a header
           echo "🛡️ Nuclei Scan Report" > ${MESSAGE_FILE}
           echo "Target: ${TARGET}" >> ${MESSAGE_FILE}
-          echo "Severity: ${SEVERITY}" >> ${MESSAGE_FILE}
           echo "" >> ${MESSAGE_FILE} # Add a blank line
 
           if [ -s "$RESULTS_FILE" ]; then
@@ -81,7 +122,7 @@ jobs:
             # Append the content of the results file directly
             cat "$RESULTS_FILE" >> ${MESSAGE_FILE}
           else
-            echo "✅ No vulnerabilities found." >> ${MESSAGE_FILE}
+            echo "✅ No vulnerabilities found for the selected severities." >> ${MESSAGE_FILE}
           fi
           
           echo "Message file created at ${MESSAGE_FILE}"
