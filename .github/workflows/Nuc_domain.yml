@@ -55,6 +55,7 @@ jobs:
           nuclei \
             -u "${{ github.event.inputs.target_domain }}" \
             -severity "${{ github.event.inputs.severity }}" \
+            -rate-limit 5 \
             -jsonl \
             -o nuclei-results.jsonl
           
