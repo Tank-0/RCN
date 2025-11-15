@@ -1,0 +1,141 @@
+# .github/workflows/nuclei-scan.yml
+
+name: 'Nuclei Vulnerability Scan'
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_domain:
+        description: 'The domain to scan (e.g., example.com)'
+        required: true
+        type: string
+      # --- Severity Level Checkboxes ---
+      severity_critical:
+        description: 'Scan for CRITICAL severity'
+        required: false
+        type: boolean
+        default: true
+      severity_high:
+        description: 'Scan for HIGH severity'
+        required: false
+        type: boolean
+        default: true
+      severity_medium:
+        description: 'Scan for MEDIUM severity'
+        required: false
+        type: boolean
+        default: true
+      severity_low:
+        description: 'Scan for LOW severity'
+        required: false
+        type: boolean
+        default: false
+      severity_info:
+        description: 'Scan for INFO severity'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  nuclei-scan:
+    name: 'Run Nuclei on Target'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v4
+
+      - name: 'Setup Go Environment'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: 'Install Nuclei'
+        run: |
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+
+      - name: 'Update Nuclei Templates'
+        run: |
+          nuclei -update-templates -silent
+
+      - name: 'Run Nuclei Scan'
+        id: nuclei-scan
+        run: |
+          echo "Starting Nuclei scan on ${{ github.event.inputs.target_domain }}..."
+          
+          # --- Build the -s flag string based on checkbox inputs ---
+          SEVERITIES=()
+          if [ "${{ github.event.inputs.severity_critical }}" == "true" ]; then
+            SEVERITIES+=("critical")
+          fi
+          if [ "${{ github.event.inputs.severity_high }}" == "true" ]; then
+            SEVERITIES+=("high")
+          fi
+          if [ "${{ github.event.inputs.severity_medium }}" == "true" ]; then
+            SEVERITIES+=("medium")
+          fi
+          if [ "${{ github.event.inputs.severity_low }}" == "true" ]; then
+            SEVERITIES+=("low")
+          fi
+          if [ "${{ github.event.inputs.severity_info }}" == "true" ]; then
+            SEVERITIES+=("info")
+          fi
+
+          # Join the array into a comma-separated string for Nuclei
+          SEVERITY_STRING=$(IFS=,; echo "${SEVERITIES[*]}")
+
+          # Check if any severities were selected
+          if [ -z "$SEVERITY_STRING" ]; then
+            echo "Error: No severity levels were selected. Please select at least one."
+            exit 1
+          fi
+
+          echo "Scanning for severities: ${SEVERITY_STRING}"
+          
+          # Run nuclei with the dynamically generated severity string
+          nuclei \
+            -u "${{ github.event.inputs.target_domain }}" \
+            -s "${SEVERITY_STRING}" \
+            -rate-limit 5 \
+            -o nuclei-results.txt
+          
+          echo "Scan complete."
+
+      - name: 'Prepare Telegram Notification File'
+        id: prepare-telegram
+        if: always() # Run this step even if the previous one failed
+        run: |
+          TARGET="${{ github.event.inputs.target_domain }}"
+          RESULTS_FILE="nuclei-results.txt"
+          MESSAGE_FILE="telegram-message.txt"
+
+          # Create the message file with a header
+          echo "🛡️ Nuclei Scan Report" > ${MESSAGE_FILE}
+          echo "Target: ${TARGET}" >> ${MESSAGE_FILE}
+          echo "" >> ${MESSAGE_FILE} # Add a blank line
+
+          if [ -s "$RESULTS_FILE" ]; then
+            echo "--- Findings ---" >> ${MESSAGE_FILE}
+            # Append the content of the results file directly
+            cat "$RESULTS_FILE" >> ${MESSAGE_FILE}
+          else
+            echo "✅ No vulnerabilities found for the selected severities." >> ${MESSAGE_FILE}
+          fi
+          
+          echo "Message file created at ${MESSAGE_FILE}"
+
+      - name: 'Send Telegram Notification with cURL'
+        if: always()
+        run: |
+          # Read the entire message from the file, preserving newlines
+          MESSAGE=$(cat telegram-message.txt)
+          
+          # Send the message using curl to the Telegram Bot API
+          curl -s -X POST \
+            "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="${MESSAGE}" \
+            -d parse_mode="Markdown"
