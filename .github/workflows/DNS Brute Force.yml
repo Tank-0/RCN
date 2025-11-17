@@ -1,0 +1,83 @@
+name: DNS Brute Force (9M+)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_domain:
+        description: 'Target domain (e.g. tesla.com)'
+        required: true
+      wordlist_url:
+        description: 'Direct raw URL to your 9M+ wordlist'
+        required: true
+
+jobs:
+  brute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install puredns + dnsx (latest)
+        run: |
+          wget -q https://github.com/d3ext/puredns/releases/latest/download/puredns-linux-amd64 -O puredns
+          wget -q https://github.com/projectdiscovery/dnsx/releases/latest/download/dnsx_1.2.0_linux_amd64.zip
+          unzip -o dnsx_*.zip && mv dnsx/dnsx .
+          chmod +x puredns dnsx
+
+      - name: Get trusted resolvers
+        run: curl -s https://raw.githubusercontent.com/trickest/resolvers/main/resolvers-trusted.txt -o resolvers.txt
+
+      - name: Download your huge wordlist
+        run: |
+          curl -L --fail ${{ inputs.wordlist_url }} -o wordlist.txt
+          echo "Wordlist loaded: $(wc -l < wordlist.txt) subdomains"
+
+      - name: Run puredns → dnsx (fastest + cleanest combo)
+        id: brute
+        run: |
+          timeout 2h ./puredns bruteforce wordlist.txt ${{ inputs.target_domain }} \
+            -r resolvers.txt --wildcard-tests 250 -q > candidates.txt || true
+
+          ./dnsx -l candidates.txt -silent -resp -o final.txt
+
+          COUNT=$(wc -l < final.txt)
+          echo "found=$COUNT" >> $GITHUB_OUTPUT
+
+          if [ $COUNT -gt 0 ]; then
+            echo "results<<EOF" >> $GITHUB_OUTPUT
+            cat final.txt >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send results to Telegram (via secrets)
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          DOMAIN="${{ inputs.target_domain }}"
+          COUNT="${{ steps.brute.outputs.found }}"
+
+          if [ "$COUNT" -gt 0 ]; then
+            RESULTS=$(cat final.txt | head -n 50)
+            MORE=$(if [ "$COUNT" -gt 50 ]; then echo "... and $((COUNT - 50)) more"; fi)
+            TEXT="New subdomains found for *${DOMAIN}*
+
+Found: *$COUNT* alive subdomains
+
+$RESULTS
+$MORE
+
+Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            TEXT="No subdomains found for *${DOMAIN}* (9M+ wordlist used)"
+          fi
+
+          curl -s -X POST https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d text="$TEXT" \
+            -d parse_mode=Markdown \
+            -d disable_web_page_preview=true
+
+      - name: Upload results (only if any found)
+        if: steps.brute.outputs.found > 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.target_domain }}-subdomains
+          path: final.txt
