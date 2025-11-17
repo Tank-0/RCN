@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       wordlist_file:
-        description: 'The full path to the wordlist file in the repository (e.g., .github/workflows/wordlist.txt)'
+        description: 'The full path to the wordlist file in the repository (e.g., .github/workflows/Best-dns-worlist/wordlist.txt)'
         required: true
         type: string
       output_file:
-        description: 'The full path and filename for the HTML output (e.g., .github/workflows/results.html)'
+        description: 'The full path and filename for the HTML output (e.g., results.html)'
         required: true
         type: string
 
@@ -92,7 +92,7 @@ jobs:
             echo "Download the 'ffuf-results' artifact from the workflow run page to view the full report." >> ${MESSAGE_FILE}
           else
             echo "--- Results ---" >> ${MESSAGE_FILE}
-            echo "✅ Fuzzing complete. No results found matching the specified filters (-fc 404, -fs 0)." >> ${MESSAGE_FILE}
+            echo "No results found matching the specified filters (-fc 404, -fs 0)." >> ${MESSAGE_FILE}
           fi
           
           echo "Message file created at ${MESSAGE_FILE}"
