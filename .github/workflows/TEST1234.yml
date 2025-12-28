@@ -1,0 +1,55 @@
+name: Subdomain Fuzzing with dnsx
+
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'The target domain (e.g., example.com)'
+        required: true
+        default: 'example.com'
+      wordlist_url:
+        description: 'URL of the wordlist to use'
+        required: false
+        default: 'https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/DNS/subdomains-top1million-5000.txt'
+
+jobs:
+  fuzz-subdomains:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install dnsx
+        run: go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+
+      - name: Download Wordlist
+        run: |
+          curl -sL ${{ github.event.inputs.wordlist_url }} -o wordlist.txt
+          echo "Downloaded wordlist"
+
+      - name: Prepare Fuzzing List
+        run: |
+          # Append the domain to every word in the wordlist and save to hosts.txt
+          # This creates input like: www.example.com, api.example.com, etc.
+          sed "s/$/.${{ github.event.inputs.domain }}/" wordlist.txt > hosts.txt
+          echo "Generated $(wc -l < hosts.txt) potential hosts"
+
+      - name: Run dnsx
+        run: |
+          # Run dnsx on the generated hosts file
+          # -silent: Only output found subdomains
+          # -resp: Include the IP address in the output
+          # -json: Optional: Output in JSON format (remove if you want plain text)
+          $HOME/go/bin/dnsx -l hosts.txt -silent -resp -o results.txt
+
+      - name: Display Results
+        run: cat results.txt
+
+      - name: Upload Results as Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dnsx-results
+          path: results.txt
